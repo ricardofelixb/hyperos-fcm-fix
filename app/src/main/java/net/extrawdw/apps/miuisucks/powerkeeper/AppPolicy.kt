@@ -72,13 +72,6 @@ data class AppPolicy(
 }
 
 object AppPolicyDefaults {
-    val HYPEROS_AUTO_UNRESTRICTED_PACKAGES: Set<String> = setOf(
-        "org.telegram.messenger",
-    )
-
-    fun initialPolicies(): Map<String, AppPolicy> =
-        HYPEROS_AUTO_UNRESTRICTED_PACKAGES.associateWith(::forPackage)
-
     /** An FCM app with no saved choice: protected from the start, with AOSP battery management left alone. */
     fun discovered(packageName: String): AppPolicy = AppPolicy(
         packageName = packageName,
@@ -89,19 +82,5 @@ object AppPolicyDefaults {
         autostartEnabled = true,
     )
 
-    fun forPackage(packageName: String): AppPolicy =
-        if (packageName in HYPEROS_AUTO_UNRESTRICTED_PACKAGES) {
-            AppPolicy(
-                packageName = packageName,
-                appEnabled = true,
-                aurogonEnabled = true,
-                autoUnstopEnabled = true,
-                autostartManaged = true,
-                autostartEnabled = true,
-                dozeManaged = true,
-                dozePolicy = AppDozePolicy.DEFAULT,
-            )
-        } else {
-            AppPolicy(packageName)
-        }
+    fun forPackage(packageName: String): AppPolicy = AppPolicy(packageName)
 }

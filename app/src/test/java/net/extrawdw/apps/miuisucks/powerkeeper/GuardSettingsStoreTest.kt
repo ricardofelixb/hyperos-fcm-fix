@@ -218,6 +218,14 @@ class GuardSettingsStoreTest {
     }
 
     @Test
+    fun telegramHasNoBatteryManagementPresetOnFreshSettings() {
+        val policy = AppPolicyDefaults.forPackage("org.telegram.messenger")
+
+        assertFalse(policy.dozeManaged)
+        assertEquals(AppPolicy("org.telegram.messenger"), policy)
+    }
+
+    @Test
     fun adoptionSkipsAppsWithASavedChoiceIncludingExplicitDisable() {
         val saved = mapOf(
             "com.example.off" to AppPolicy("com.example.off", appEnabled = false, aurogonEnabled = true),

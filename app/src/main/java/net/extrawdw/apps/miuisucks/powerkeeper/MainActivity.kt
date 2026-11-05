@@ -99,7 +99,7 @@ data class ApplyProgress(
 
 data class GuardUiState(
     val settings: GuardSettings = GuardSettings(
-        appPolicies = AppPolicyDefaults.initialPolicies(),
+        appPolicies = emptyMap(),
         fcmReconnectEnabled = GuardSettingsStore.DEFAULT_FCM_RECONNECT_ENABLED,
         androidUsers = emptyList(),
     ),

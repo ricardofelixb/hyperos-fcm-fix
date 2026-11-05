@@ -51,15 +51,10 @@ class GuardSettingsStore(context: Context) {
 
     fun loadAppPolicies(): Map<String, AppPolicy> {
         migrateAppPoliciesIfNeeded()
-        val policies = preferences.getStringSet(KEY_APP_POLICIES, emptySet())
+        return preferences.getStringSet(KEY_APP_POLICIES, emptySet())
             .orEmpty()
             .mapNotNull(::decodeAppPolicy)
             .associateBy(AppPolicy::packageName)
-            .toMutableMap()
-        AppPolicyDefaults.initialPolicies().forEach { (packageName, policy) ->
-            policies.putIfAbsent(packageName, policy)
-        }
-        return policies
     }
 
     private fun migrateAppPoliciesIfNeeded() {
