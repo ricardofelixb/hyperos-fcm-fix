@@ -99,9 +99,7 @@ data class ApplyProgress(
 
 data class GuardUiState(
     val settings: GuardSettings = GuardSettings(
-        appPolicies = AppPolicyDefaults.initialPolicies(),
-        intervalMinutes = GuardSettingsStore.DEFAULT_INTERVAL_MINUTES,
-        milletPollingIntervalMillis = MilletPollingInterval.DEFAULT_MILLIS,
+        appPolicies = emptyMap(),
         fcmReconnectEnabled = GuardSettingsStore.DEFAULT_FCM_RECONNECT_ENABLED,
         androidUsers = emptyList(),
     ),
@@ -133,14 +131,12 @@ class MainActivity : ComponentActivity() {
     private var shizukuRefreshGeneration = 0
     private var applyAfterAndroidUserRefresh = false
     private var loadingInstalledApps = false
-    private var stalePeriodicRunning = false
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         refreshState()
         refreshShizukuStatus { status ->
             if (status.granted) {
                 refreshProtectionStatus()
-                maybeApplyStaleSettings()
             }
         }
     }
@@ -169,7 +165,6 @@ class MainActivity : ComponentActivity() {
         refreshShizukuStatus { status ->
             if (status.granted) {
                 refreshProtectionStatus()
-                maybeApplyStaleSettings()
             }
         }
     }
@@ -193,7 +188,6 @@ class MainActivity : ComponentActivity() {
                         onRefreshAndroidUsers = { refreshAndroidUsers() },
                         onAndroidUserEnabledChanged = ::setAndroidUserEnabled,
                         onRefreshProtectionStatus = ::refreshProtectionStatus,
-                        onMilletPollingIntervalSelected = ::setMilletPollingInterval,
                         onFcmReconnectEnabledChanged = ::setFcmReconnectEnabled,
                         onNighttimeFcmProtectionEnabledChanged = ::setNighttimeFcmProtectionEnabled,
                         onOpenFcmDiagnostics = ::openFcmDiagnostics,
@@ -204,7 +198,6 @@ class MainActivity : ComponentActivity() {
                         onAutostartChanged = ::setAutostartEnabled,
                         onDozeManagedChanged = ::setDozeManaged,
                         onDozeChanged = ::setDozePolicy,
-                        onIntervalSelected = ::setInterval,
                         onLogsCleared = ::flushServiceLogs,
                     )
                 }
@@ -219,7 +212,6 @@ class MainActivity : ComponentActivity() {
                 } else {
                     val store = GuardSettingsStore(applicationContext)
                     val settings = store.loadSettings()
-                    EnforcementScheduler.schedule(applicationContext, settings.intervalMinutes)
                     StartupData(
                         compatibility = checkedCompatibility,
                         settingsStore = store,
@@ -236,6 +228,7 @@ class MainActivity : ComponentActivity() {
             }
 
             settingsStore = requireNotNull(startup.settingsStore)
+            GuardService.start(applicationContext)
             uiState = uiState.copy(
                 settings = requireNotNull(startup.settings),
                 lastRun = startup.lastRun,
@@ -250,7 +243,6 @@ class MainActivity : ComponentActivity() {
                 if (status.granted) {
                     if (uiState.settings.androidUsers.isEmpty()) refreshAndroidUsers()
                     refreshProtectionStatus()
-                    maybeApplyStaleSettings()
                 }
             }
         }
@@ -393,9 +385,8 @@ class MainActivity : ComponentActivity() {
         runAppSettingAction(packageName, if (enabled) "app-on" else "app-off") {
             buildString {
                 appendLine(
-                    PrivilegedServiceClient.reconcileAurogon(
+                    PrivilegedServiceClient.reconcileFcmSettings(
                         settings.aurogonEnabledPackages,
-                        settings.milletPollingIntervalMillis,
                         settings.fcmReconnectEnabled,
                         TRIGGER_UI_APP_CHANGE,
                     ),
@@ -423,9 +414,8 @@ class MainActivity : ComponentActivity() {
         val settings = refreshAppSetting(packageName, willApply = true)
         if (!uiState.shizuku.granted) return
         runAppSettingAction(packageName, "aurogon") {
-            PrivilegedServiceClient.reconcileAurogon(
+            PrivilegedServiceClient.reconcileFcmSettings(
                 settings.aurogonEnabledPackages,
-                settings.milletPollingIntervalMillis,
                 settings.fcmReconnectEnabled,
                 TRIGGER_UI_APP_CHANGE,
             )
@@ -562,51 +552,12 @@ class MainActivity : ComponentActivity() {
         loadingInstalledApps = true
         lifecycleScope.launch {
             val apps = withContext(Dispatchers.IO) {
+                // Show the state the guard will apply, even before Shizuku lets it run.
+                settingsStore.adoptFcmApps(FcmAppDiscovery.find(applicationContext))
                 InstalledFcmApps.load(applicationContext, settingsStore.loadAppPolicies().keys)
             }
-            uiState = uiState.copy(installedApps = apps)
+            uiState = uiState.copy(installedApps = apps, settings = settingsStore.loadSettings())
             loadingInstalledApps = false
-        }
-    }
-
-    private fun setInterval(minutes: Long) {
-        settingsStore.setIntervalMinutes(minutes)
-        lifecycleScope.launch(Dispatchers.IO) {
-            EnforcementScheduler.schedule(applicationContext, minutes)
-        }
-        refreshState(
-            getString(R.string.frequency_changed_message, formatInterval(minutes)),
-            messageIsError = false,
-        )
-    }
-
-    private fun setMilletPollingInterval(intervalMillis: Long) {
-        val normalizedIntervalMillis = MilletPollingInterval.normalize(intervalMillis)
-        settingsStore.setMilletPollingIntervalMillis(normalizedIntervalMillis)
-        val formattedInterval = formatMilletPollingInterval(normalizedIntervalMillis)
-        refreshState(
-            getString(R.string.millet_polling_frequency_changed_message, formattedInterval),
-            messageIsError = false,
-        )
-        if (!uiState.shizuku.granted) return
-
-        lifecycleScope.launch {
-            runCatching {
-                PrivilegedServiceClient.configureFcmPolling(
-                    normalizedIntervalMillis,
-                    uiState.settings.fcmReconnectEnabled,
-                    TRIGGER_UI_MILLET_POLLING_INTERVAL,
-                )
-            }.onFailure { error ->
-                uiState = uiState.copy(
-                    message = getString(
-                        R.string.millet_polling_frequency_apply_failed_message,
-                        formattedInterval,
-                        error.uiFailureMessage(),
-                    ),
-                    messageIsError = true,
-                )
-            }
         }
     }
 
@@ -622,8 +573,7 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             runCatching {
-                PrivilegedServiceClient.configureFcmPolling(
-                    uiState.settings.milletPollingIntervalMillis,
+                PrivilegedServiceClient.configureFcmProtection(
                     enabled,
                     TRIGGER_UI_FCM_RECONNECT,
                 )
@@ -641,6 +591,8 @@ class MainActivity : ComponentActivity() {
 
     private fun setNighttimeFcmProtectionEnabled(enabled: Boolean) {
         settingsStore.setNighttimeFcmProtectionEnabled(enabled)
+        // The service only watches the game allowlist while this option is on.
+        GuardService.start(applicationContext)
         uiState = uiState.copy(nighttimeGameAllowlistValue = null)
         refreshState(
             getString(
@@ -652,8 +604,7 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             runCatching {
-                val report = PrivilegedServiceClient.configureFcmPolling(
-                    uiState.settings.milletPollingIntervalMillis,
+                val report = PrivilegedServiceClient.configureFcmProtection(
                     uiState.settings.fcmReconnectEnabled,
                     TRIGGER_UI_NIGHTTIME_FCM,
                 )
@@ -667,47 +618,6 @@ class MainActivity : ComponentActivity() {
                     message = getString(R.string.nighttime_fcm_apply_failed_message, error.uiFailureMessage()),
                     messageIsError = true,
                 )
-            }
-        }
-    }
-
-    private fun maybeApplyStaleSettings() {
-        if (!uiState.shizuku.granted || uiState.applying) return
-        if (!GuardSettingsStore.isPeriodicEnforcementEnabled(uiState.settings.intervalMinutes)) return
-        val lastRun = settingsStore.loadLastRun()
-        val intervalMillis = settingsStore.loadSettings().intervalMinutes * 60_000L
-        if (lastRun == null || System.currentTimeMillis() - lastRun.timestampMillis >= intervalMillis) {
-            applyPeriodicPolicies()
-        }
-    }
-
-    private fun applyPeriodicPolicies() {
-        if (stalePeriodicRunning) return
-        stalePeriodicRunning = true
-        val settings = settingsStore.loadSettings()
-        lifecycleScope.launch {
-            runCatching {
-                PrivilegedServiceClient.enforce(
-                    settings.aurogonEnabledPackages,
-                    settings.enabledAppPolicies,
-                    settingsStore.loadEnabledAndroidUserIds(),
-                    settings.milletPollingIntervalMillis,
-                    settings.fcmReconnectEnabled,
-                    TRIGGER_UI_STALE_PERIODIC,
-                )
-            }.onSuccess { report ->
-                stalePeriodicRunning = false
-                val succeeded = !report.contains("FAILED:") && !report.contains("exit_code=")
-                settingsStore.saveLastRun(succeeded, report)
-                uiState = uiState.copy(lastRun = settingsStore.loadLastRun())
-            }.onFailure { error ->
-                stalePeriodicRunning = false
-                AppLog.e("UI/Periodic", "stale periodic enforcement failed", error)
-                settingsStore.saveLastRun(
-                    false,
-                    getString(R.string.settings_failed_message, error.uiFailureMessage()),
-                )
-                uiState = uiState.copy(lastRun = settingsStore.loadLastRun())
             }
         }
     }
@@ -740,7 +650,6 @@ class MainActivity : ComponentActivity() {
                     settings.aurogonEnabledPackages,
                     settings.enabledAppPolicies,
                     targetUserIds,
-                    settings.milletPollingIntervalMillis,
                     settings.fcmReconnectEnabled,
                     TRIGGER_UI_APPLY,
                     onProgress = { completed, total ->
@@ -852,8 +761,7 @@ class MainActivity : ComponentActivity() {
         uiState = uiState.copy(checkingMilletValue = true)
         lifecycleScope.launch {
             runCatching {
-                val configurationReport = PrivilegedServiceClient.configureFcmPolling(
-                    settings.milletPollingIntervalMillis,
+                val configurationReport = PrivilegedServiceClient.configureFcmProtection(
                     settings.fcmReconnectEnabled,
                     TRIGGER_UI_PROTECTION_STATUS,
                 )
@@ -908,22 +816,6 @@ class MainActivity : ComponentActivity() {
         else -> message ?: getString(R.string.unknown_error)
     }
 
-    private fun formatInterval(minutes: Long): String = when (minutes) {
-        GuardSettingsStore.DISABLED_INTERVAL_MINUTES -> getString(R.string.off)
-        60L -> getString(R.string.interval_one_hour)
-        in 0L..59L -> getString(R.string.interval_minutes, minutes)
-        else -> resources.getQuantityString(
-            R.plurals.interval_hours,
-            (minutes / 60L).toInt(),
-            minutes / 60L,
-        )
-    }
-
-    private fun formatMilletPollingInterval(intervalMillis: Long): String = getString(
-        R.string.polling_interval_seconds,
-        MilletPollingInterval.secondsLabel(intervalMillis),
-    )
-
     companion object {
         private const val SHIZUKU_PERMISSION_REQUEST = 42
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
@@ -932,12 +824,10 @@ class MainActivity : ComponentActivity() {
         private const val TRIGGER_UI_APPLY = "ui:apply"
         private const val TRIGGER_UI_USERS = "ui:user-list"
         private const val TRIGGER_UI_PROTECTION_STATUS = "ui:protection-status"
-        private const val TRIGGER_UI_MILLET_POLLING_INTERVAL = "ui:millet-polling-interval"
         private const val TRIGGER_UI_FCM_RECONNECT = "ui:fcm-reconnect"
         private const val TRIGGER_UI_NIGHTTIME_FCM = "ui:nighttime-fcm"
         private const val TRIGGER_UI_LOGS = "ui:logs-cleared"
         private const val TRIGGER_UI_APP_CHANGE = "ui:app-change"
-        private const val TRIGGER_UI_STALE_PERIODIC = "ui:stale-periodic"
     }
 }
 
@@ -969,7 +859,6 @@ internal fun GuardApp(
     onRefreshAndroidUsers: () -> Unit,
     onAndroidUserEnabledChanged: (Int, Boolean) -> Unit,
     onRefreshProtectionStatus: () -> Unit,
-    onMilletPollingIntervalSelected: (Long) -> Unit,
     onFcmReconnectEnabledChanged: (Boolean) -> Unit,
     onNighttimeFcmProtectionEnabledChanged: (Boolean) -> Unit,
     onOpenFcmDiagnostics: () -> Unit,
@@ -980,7 +869,6 @@ internal fun GuardApp(
     onAutostartChanged: (String, Boolean) -> Unit,
     onDozeManagedChanged: (String, Boolean) -> Unit,
     onDozeChanged: (String, AppDozePolicy) -> Unit,
-    onIntervalSelected: (Long) -> Unit,
     onLogsCleared: () -> Unit,
 ) {
     var showingLogs by rememberSaveable { mutableStateOf(false) }
@@ -1045,7 +933,6 @@ internal fun GuardApp(
                                     MilletNoRestrictCard(
                                         state = state,
                                         onCheckValue = onRefreshProtectionStatus,
-                                        onPollingIntervalSelected = onMilletPollingIntervalSelected,
                                         onFcmReconnectEnabledChanged = onFcmReconnectEnabledChanged,
                                         onNighttimeFcmProtectionEnabledChanged = onNighttimeFcmProtectionEnabledChanged,
                                     )
@@ -1070,7 +957,6 @@ internal fun GuardApp(
                             item {
                                 ProtectionCard(
                                     state = state,
-                                    onIntervalSelected = onIntervalSelected,
                                     onApplyNow = onApplyNow,
                                 )
                             }
@@ -1079,7 +965,6 @@ internal fun GuardApp(
                                     MilletNoRestrictCard(
                                         state = state,
                                         onCheckValue = onRefreshProtectionStatus,
-                                        onPollingIntervalSelected = onMilletPollingIntervalSelected,
                                         onFcmReconnectEnabledChanged = onFcmReconnectEnabledChanged,
                                         onNighttimeFcmProtectionEnabledChanged = onNighttimeFcmProtectionEnabledChanged,
                                     )
@@ -1209,7 +1094,6 @@ private fun ShizukuCard(
 @Composable
 private fun ProtectionCard(
     state: GuardUiState,
-    onIntervalSelected: (Long) -> Unit,
     onApplyNow: () -> Unit,
 ) {
     val policies = state.settings.enabledAppPolicies
@@ -1241,10 +1125,6 @@ private fun ProtectionCard(
                     color = if (state.messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 )
             }
-            PeriodicEnforcementFrequencyRow(
-                selectedMinutes = state.settings.intervalMinutes,
-                onIntervalSelected = onIntervalSelected,
-            )
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onApplyNow,
@@ -1266,61 +1146,6 @@ private fun ProtectionCard(
                     }
                 } else {
                     Text(stringResource(R.string.apply_now))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PeriodicEnforcementFrequencyRow(
-    selectedMinutes: Long,
-    onIntervalSelected: (Long) -> Unit,
-) {
-    val options = remember {
-        listOf(GuardSettingsStore.DISABLED_INTERVAL_MINUTES, 15L, 60L, 180L, 360L)
-    }
-    var expanded by rememberSaveable { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            stringResource(R.string.check_frequency),
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Box {
-            TextButton(onClick = { expanded = true }) {
-                Text(formatInterval(selectedMinutes), maxLines = 1)
-                Icon(
-                    imageVector = Icons.Filled.ArrowDropDown,
-                    contentDescription = null,
-                )
-            }
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-            ) {
-                options.forEach { minutes ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                formatInterval(minutes),
-                                fontWeight = if (minutes == selectedMinutes) {
-                                    FontWeight.SemiBold
-                                } else {
-                                    FontWeight.Normal
-                                },
-                            )
-                        },
-                        onClick = {
-                            expanded = false
-                            if (minutes != selectedMinutes) onIntervalSelected(minutes)
-                        },
-                    )
                 }
             }
         }
@@ -1403,7 +1228,6 @@ private fun AndroidUsersCard(
 private fun MilletNoRestrictCard(
     state: GuardUiState,
     onCheckValue: () -> Unit,
-    onPollingIntervalSelected: (Long) -> Unit,
     onFcmReconnectEnabledChanged: (Boolean) -> Unit,
     onNighttimeFcmProtectionEnabledChanged: (Boolean) -> Unit,
 ) {
@@ -1452,34 +1276,6 @@ private fun MilletNoRestrictCard(
                     textAlign = TextAlign.End,
                 )
             }
-            Text(
-                stringResource(R.string.millet_polling_frequency),
-                style = MaterialTheme.typography.labelLarge,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                MilletPollingInterval.OPTIONS_MILLIS.forEachIndexed { index, intervalMillis ->
-                    SegmentedButton(
-                        selected = state.settings.milletPollingIntervalMillis == intervalMillis,
-                        onClick = {
-                            if (state.settings.milletPollingIntervalMillis != intervalMillis) {
-                                onPollingIntervalSelected(intervalMillis)
-                            }
-                        },
-                        enabled = !state.applying,
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index,
-                            MilletPollingInterval.OPTIONS_MILLIS.size,
-                        ),
-                    ) {
-                        Text(formatMilletPollingInterval(intervalMillis), maxLines = 1)
-                    }
-                }
-            }
-            Text(
-                stringResource(R.string.millet_polling_frequency_description),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1688,21 +1484,3 @@ private fun LogsCard(onOpenLogs: () -> Unit) {
         }
     }
 }
-
-@Composable
-private fun formatInterval(minutes: Long): String = when (minutes) {
-    GuardSettingsStore.DISABLED_INTERVAL_MINUTES -> stringResource(R.string.off)
-    60L -> stringResource(R.string.interval_one_hour)
-    in 0L..59L -> stringResource(R.string.interval_minutes, minutes)
-    else -> pluralStringResource(
-        R.plurals.interval_hours,
-        (minutes / 60L).toInt(),
-        minutes / 60L,
-    )
-}
-
-@Composable
-private fun formatMilletPollingInterval(intervalMillis: Long): String = stringResource(
-    R.string.polling_interval_seconds,
-    MilletPollingInterval.secondsLabel(intervalMillis),
-)

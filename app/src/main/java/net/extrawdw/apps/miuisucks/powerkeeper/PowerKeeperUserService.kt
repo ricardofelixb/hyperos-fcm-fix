@@ -10,25 +10,16 @@ import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 class PowerKeeperUserService : IPrivilegedService.Stub {
     constructor() : super()
 
-    private val fcmExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "fcm-protection").apply { isDaemon = true }
-    }
     private val systemCommands = SystemServiceCommandRunner()
     private val fcmRepairLock = Any()
     private val aurogonRepairLock = Any()
     private var autostartSwitchOpAvailable: Boolean? = null
-    @Volatile
-    private var fcmPolling: ScheduledFuture<*>? = null
-    @Volatile
-    private var fcmPollingIntervalMillis = MilletPollingInterval.DEFAULT_MILLIS
     @Volatile
     private var fcmReconnectEnabled = true
     private val gameProtection = GameAllowlistProtection(
@@ -42,7 +33,6 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
         thawGms = { sendOwnerGmsThaw().asResult().map { } },
         reconnectGms = { sendGmsReconnect().asResult().map { } },
     )
-    private var cachedGmsUid: Int? = null
     private val serviceLogLock = Any()
     private val serviceLogTimeFormat = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     private val pendingServiceLogs = ArrayDeque<String>()
@@ -284,8 +274,6 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
     override fun destroy() {
         serviceLog('I', "Service", "destroy uid=${Process.myUid()}")
         Log.i(TAG, "Destroying Shizuku user service")
-        fcmPolling?.cancel(false)
-        fcmExecutor.shutdownNow()
         systemCommands.close()
         synchronized(serviceLogLock) {
             runCatching { serviceLogWriter?.close() }
@@ -299,29 +287,45 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
         trigger: String,
     ): String {
         val desired = aurogonPackages.toSet()
-        val logTag = fcmLogTag(trigger)
-        serviceLog(
-            'I',
-            logTag,
-            "start trigger=$trigger aurogon=${desired.size} pollActive=${isFcmPollingActive()}",
-        )
-        startFcmPolling()
-
+        serviceLog('I', FCM_LOG_TAG, "start trigger=$trigger aurogon=${desired.size}")
         val report = buildString {
             appendLine("FCM protection")
             appendLine(runGreezerCommand("Disable explicit GMS limiter", "IM", "GMS", "disable"))
             appendLine(runGreezerCommand("Restore ordinary GMS allowlist", "LM", "add", MilletNoRestrictList.GMS_PACKAGE))
-            appendLine(ensureGmsNoRestrict(logTag))
-            appendLine(maintainGameProtection(logTag).report)
-            appendLine(ensureAurogon(desired))
-            append(
-                "FCM setting monitor: active " +
-                    "(${MilletPollingInterval.diagnosticLabel(fcmPollingIntervalMillis)} Shizuku poll, " +
-                    "reconnect ${if (fcmReconnectEnabled) "enabled" else "disabled"})",
-            )
+            append(reconcileSettings(desired, trigger))
         }
-        serviceLog('I', logTag, "finish trigger=$trigger report=${report.singleLine(2_000)}")
+        serviceLog('I', FCM_LOG_TAG, "finish trigger=$trigger report=${report.singleLine(2_000)}")
         return report
+    }
+
+    override fun reconcileFcmSettings(
+        aurogonPackages: Array<out String>,
+        trigger: String,
+    ): String {
+        val desired = aurogonPackages.toSet()
+        val report = reconcileSettings(desired, trigger)
+        serviceLog(
+            if (report.contains("FAILED")) 'E' else 'I',
+            FCM_LOG_TAG,
+            "reconcile trigger=$trigger aurogon=${desired.size} report=${report.singleLine(2_000)}",
+        )
+        return report
+    }
+
+    /**
+     * Brings the settings HyperOS rewrites back to the protected state. Greezer is not touched here
+     * because only a system_server restart resets it. Re-adding GMS to the no-restrict list can
+     * leave Play services disconnected, so that repair also asks it to reconnect.
+     */
+    private fun reconcileSettings(desired: Set<String>, trigger: String): String = buildString {
+        val millet = ensureMilletNoRestrict()
+        appendLine(millet.report)
+        appendLine(maintainGameProtection(FCM_LOG_TAG).report)
+        append(ensureAurogon(desired))
+        if (millet.gmsRepaired && fcmReconnectEnabled) {
+            appendLine()
+            append(forceFcmReconnect("repair:$trigger"))
+        }
     }
 
     override fun unstop(
@@ -390,21 +394,6 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
             if (failed > 0) 'E' else 'I',
             "Unstop",
             "finish trigger=$trigger report=${report.singleLine(2_000)}",
-        )
-        return report
-    }
-
-    override fun reconcileAurogon(
-        aurogonPackages: Array<out String>,
-        trigger: String,
-    ): String {
-        val desired = aurogonPackages.toSet()
-        startFcmPolling()
-        val report = ensureAurogon(desired)
-        serviceLog(
-            if (report.contains("FAILED:")) 'E' else 'I',
-            "Aurogon",
-            "reconcile trigger=$trigger enabled=${desired.size} report=${report.singleLine(2_000)}",
         )
         return report
     }
@@ -524,139 +513,27 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
         }
     }
 
-    override fun configureFcmPolling(
-        intervalMillis: Long,
+    override fun configureFcmProtection(
         fcmReconnectEnabled: Boolean,
         nighttimeProtectionEnabled: Boolean,
         removeGameAllowlistGmsOnDisable: Boolean,
         trigger: String,
     ): String {
-        require(MilletPollingInterval.isSupported(intervalMillis)) {
-            "Unsupported MILLET polling interval: $intervalMillis ms"
-        }
-        val wasActive: Boolean
-        val changed: Boolean
-        val reconnectChanged: Boolean
-        synchronized(this) {
-            wasActive = isFcmPollingActive()
-            changed = fcmPollingIntervalMillis != intervalMillis
-            reconnectChanged = this.fcmReconnectEnabled != fcmReconnectEnabled
-            if (wasActive && changed) {
-                fcmPolling?.cancel(false)
-                fcmPolling = null
-            }
-            fcmPollingIntervalMillis = intervalMillis
-            this.fcmReconnectEnabled = fcmReconnectEnabled
-            startFcmPollingLocked()
-        }
-        val label = MilletPollingInterval.diagnosticLabel(intervalMillis)
+        val reconnectChanged = this.fcmReconnectEnabled != fcmReconnectEnabled
+        this.fcmReconnectEnabled = fcmReconnectEnabled
         val nightResult = gameProtection.configure(nighttimeProtectionEnabled, removeGameAllowlistGmsOnDisable)
-        logGameProtection(nightResult, fcmLogTag(trigger))
+        logGameProtection(nightResult, FCM_LOG_TAG)
         serviceLog(
             'I',
-            fcmLogTag(trigger),
-            "poll configured trigger=$trigger interval=$label changed=$changed " +
-                "fcmReconnect=$fcmReconnectEnabled reconnectChanged=$reconnectChanged wasActive=$wasActive " +
+            FCM_LOG_TAG,
+            "configured trigger=$trigger fcmReconnect=$fcmReconnectEnabled reconnectChanged=$reconnectChanged " +
                 "nighttimeProtection=$nighttimeProtectionEnabled",
         )
-        return "FCM setting monitor: active ($label Shizuku poll, " +
-            "reconnect ${if (fcmReconnectEnabled) "enabled" else "disabled"})\n${nightResult.report}"
+        return nightResult.report
     }
 
-    private fun startFcmPolling() {
-        synchronized(this) {
-            startFcmPollingLocked()
-        }
-    }
-
-    private fun startFcmPollingLocked() {
-        if (isFcmPollingActive()) return
-        val intervalMillis = fcmPollingIntervalMillis
-        fcmPolling = fcmExecutor.scheduleWithFixedDelay(
-            {
-                runFcmPoll()
-            },
-            intervalMillis,
-            intervalMillis,
-            TimeUnit.MILLISECONDS,
-        )
-        serviceLog(
-            'I',
-            FCM_POLL_LOG_TAG,
-            "poll started interval=${MilletPollingInterval.diagnosticLabel(intervalMillis)}",
-        )
-    }
-
-    private fun isFcmPollingActive(): Boolean =
-        fcmPolling?.let { !it.isCancelled && !it.isDone } == true
-
-    private fun runFcmPoll() {
-        runCatching { ensureGmsNoRestrict(FCM_POLL_LOG_TAG) }
-            .onSuccess { result -> logMilletRepairResult(result) }
-            .onFailure { error ->
-                serviceLog('E', FCM_POLL_LOG_TAG, "MILLET repair crashed: ${error.stackTraceToString().take(4_000)}")
-            }
-        runCatching { maintainGameProtection(FCM_POLL_LOG_TAG) }
-            .onFailure { error ->
-                serviceLog('E', FCM_POLL_LOG_TAG, "nighttime protection crashed: ${error.stackTraceToString().take(4_000)}")
-            }
-        if (fcmReconnectEnabled) {
-            runCatching { runFcmReconnectProtection() }
-                .onFailure { error ->
-                    serviceLog(
-                        'E',
-                        FCM_POLL_LOG_TAG,
-                        "reconnect protection crashed: ${error.stackTraceToString().take(4_000)}",
-                    )
-                }
-        }
-    }
-
-    private fun runFcmReconnectProtection() {
-        val previouslyCachedUid = cachedGmsUid
-        val gmsUid = previouslyCachedUid ?: refreshCachedGmsUid()
-        if (gmsUid == null) {
-            forceFcmReconnect("poll:gms-uid-unavailable")
-            return
-        }
-
-        when (FcmSocketProbe.probe(gmsUid)) {
-            FcmSocketProbeResult.MATCHED -> Unit
-            FcmSocketProbeResult.NO_MATCH -> {
-                serviceLog(
-                    'I',
-                    FCM_POLL_LOG_TAG,
-                    "socket no match cachedGmsUid=$gmsUid " +
-                        "pollInterval=${MilletPollingInterval.diagnosticLabel(fcmPollingIntervalMillis)}",
-                )
-                if (previouslyCachedUid != null) refreshCachedGmsUid()
-                forceFcmReconnect("poll:socket-missing")
-            }
-            FcmSocketProbeResult.UNAVAILABLE -> forceFcmReconnect("poll:socket-unavailable")
-        }
-    }
-
-    private fun refreshCachedGmsUid(): Int? {
-        val result = runSystemCommand(
-            SystemServiceCommands.packageManager(
-                "list",
-                "packages",
-                "--user",
-                SETTINGS_USER,
-                "-U",
-                MilletNoRestrictList.GMS_PACKAGE,
-            ),
-            GMS_UID_COMMAND_TIMEOUT_SECONDS,
-        )
-        val resolvedUid = result.takeIf(SystemServiceCommandRunner.Result::succeeded)
-            ?.output
-            ?.let { output -> PackageManagerOutput.packageUid(output, MilletNoRestrictList.GMS_PACKAGE) }
-        if (resolvedUid != null) cachedGmsUid = resolvedUid
-        return resolvedUid
-    }
-
-    override fun forceFcmReconnect(trigger: String): String {
-        val logTag = fcmLogTag(trigger)
+    private fun forceFcmReconnect(trigger: String): String {
+        val logTag = FCM_LOG_TAG
         val thaw = gameProtection.prepareReconnect()
         if (thaw.isFailure) {
             val error = thaw.exceptionOrNull()
@@ -726,33 +603,22 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
     private fun SystemServiceCommandRunner.Result.asResult(): Result<String> =
         if (succeeded) Result.success(output) else Result.failure(IllegalStateException(summary))
 
-    private fun logMilletRepairResult(result: String) {
-        if (result.contains("FAILED")) {
-            serviceLog('E', FCM_POLL_LOG_TAG, "MILLET repair result=${result.singleLine(2_000)}")
-        } else if (result.contains("append write completed")) {
-            serviceLog('I', FCM_POLL_LOG_TAG, "MILLET repair result=${result.singleLine(2_000)}")
-        }
-    }
-
-    private fun fcmLogTag(trigger: String): String = when {
-        trigger.startsWith(FCM_POLL_TRIGGER_PREFIX) -> FCM_POLL_LOG_TAG
-        else -> FCM_LOG_TAG
-    }
-
-    private fun ensureGmsNoRestrict(logTag: String): String = synchronized(fcmRepairLock) {
+    private fun ensureMilletNoRestrict(): MilletRepair = synchronized(fcmRepairLock) {
         val initialRead = readMilletNoRestrict()
         if (!initialRead.succeeded) {
-            serviceLog('E', logTag, "MILLET read failed ${initialRead.summary}")
-            return@synchronized "MILLET no-restrict: FAILED to read (${initialRead.summary})"
+            serviceLog('E', FCM_LOG_TAG, "MILLET read failed ${initialRead.summary}")
+            return@synchronized MilletRepair("MILLET no-restrict: FAILED to read (${initialRead.summary})", false)
         }
 
         val existing = MilletNoRestrictList.parse(initialRead.output)
-        if (MilletNoRestrictList.GMS_PACKAGE in existing) {
-            return@synchronized "MILLET no-restrict: GMS present; preserved ${existing.size} entries"
+        val updated = MilletNoRestrictList.appendMissing(initialRead.output, MILLET_REQUIRED_PACKAGES)
+        if (updated.size == existing.size) {
+            return@synchronized MilletRepair(
+                "MILLET no-restrict: GMS and this app present; preserved ${existing.size} entries",
+                false,
+            )
         }
 
-        val updated = MilletNoRestrictList.appendGms(initialRead.output)
-        val serialized = MilletNoRestrictList.serialize(updated)
         val write = runSystemCommand(
             SystemServiceCommands.settings(
                 "--user",
@@ -760,21 +626,24 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
                 "put",
                 "system",
                 MilletNoRestrictList.SETTING_NAME,
-                serialized,
+                MilletNoRestrictList.serialize(updated),
             ),
             SETTINGS_COMMAND_TIMEOUT_SECONDS,
         )
         if (!write.succeeded) {
-            serviceLog('E', logTag, "MILLET append failed existing=${existing.joinToString()} ${write.summary}")
-            return@synchronized "MILLET no-restrict: FAILED to append GMS (${write.summary})"
+            serviceLog('E', FCM_LOG_TAG, "MILLET append failed existing=${existing.joinToString()} ${write.summary}")
+            return@synchronized MilletRepair("MILLET no-restrict: FAILED to append (${write.summary})", false)
         }
 
         serviceLog(
             'I',
-            logTag,
+            FCM_LOG_TAG,
             "MILLET append write completed existing=${existing.joinToString()} updated=${updated.joinToString()}",
         )
-        "MILLET no-restrict: append write completed after preserving ${existing.size} entries"
+        MilletRepair(
+            "MILLET no-restrict: append write completed after preserving ${existing.size} entries",
+            MilletNoRestrictList.GMS_PACKAGE !in existing,
+        )
     }
 
     private fun readMilletNoRestrict(): SystemServiceCommandRunner.Result = runSystemCommand(
@@ -983,6 +852,8 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
         }
     }
 
+    private data class MilletRepair(val report: String, val gmsRepaired: Boolean)
+
     private data class InstalledPackagesSnapshot(
         val packagesByUser: Map<Int, Set<String>>,
         val report: String,
@@ -995,7 +866,6 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
         private const val POLICY_COMMAND_TIMEOUT_SECONDS = 10L
         private const val SETTINGS_COMMAND_TIMEOUT_SECONDS = 10L
         private const val FCM_COMMAND_TIMEOUT_SECONDS = 10L
-        private const val GMS_UID_COMMAND_TIMEOUT_SECONDS = 10L
         private const val GREEZER_COMMAND_TIMEOUT_SECONDS = 20L
         private const val USER_LIST_COMMAND_TIMEOUT_SECONDS = 10L
         private const val MAX_OUTPUT_LENGTH = 64_000
@@ -1005,8 +875,7 @@ class PowerKeeperUserService : IPrivilegedService.Stub {
         private const val GCM_RECONNECT_ACTION = "com.google.android.intent.action.GCM_RECONNECT"
         private const val MIPUSH_REFRESH_ALLOWLIST_ACTION = "com.xiaomi.mipush.REFRESH_WHITE_LIST_ACTION"
         private const val FCM_LOG_TAG = "FCM"
-        private const val FCM_POLL_LOG_TAG = "FCMPoll"
-        private const val FCM_POLL_TRIGGER_PREFIX = "poll:"
+        private val MILLET_REQUIRED_PACKAGES = listOf(MilletNoRestrictList.GMS_PACKAGE, BuildConfig.APPLICATION_ID)
         private const val NANOS_PER_SECOND = 1_000_000_000L
     }
 }

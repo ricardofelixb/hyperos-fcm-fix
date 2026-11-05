@@ -7,28 +7,6 @@ import org.junit.Test
 
 class GuardSettingsStoreTest {
     @Test
-    fun offIntervalRemainsDisabled() {
-        assertEquals(
-            GuardSettingsStore.DISABLED_INTERVAL_MINUTES,
-            GuardSettingsStore.normalizeIntervalMinutes(GuardSettingsStore.DISABLED_INTERVAL_MINUTES),
-        )
-        assertFalse(
-            GuardSettingsStore.isPeriodicEnforcementEnabled(GuardSettingsStore.DISABLED_INTERVAL_MINUTES),
-        )
-    }
-
-    @Test
-    fun enabledIntervalHonorsWorkManagerMinimum() {
-        assertEquals(
-            GuardSettingsStore.MINIMUM_INTERVAL_MINUTES,
-            GuardSettingsStore.normalizeIntervalMinutes(1L),
-        )
-        assertTrue(
-            GuardSettingsStore.isPeriodicEnforcementEnabled(GuardSettingsStore.MINIMUM_INTERVAL_MINUTES),
-        )
-    }
-
-    @Test
     fun fcmReconnectDefaultsEnabled() {
         assertTrue(GuardSettingsStore.DEFAULT_FCM_RECONNECT_ENABLED)
     }
@@ -170,8 +148,6 @@ class GuardSettingsStoreTest {
         val settings = GuardSettings(
             appPolicies = listOf(enabledAurogon, enabledUnstop, disabled)
                 .associateBy(AppPolicy::packageName),
-            intervalMinutes = GuardSettingsStore.MINIMUM_INTERVAL_MINUTES,
-            milletPollingIntervalMillis = MilletPollingInterval.DEFAULT_MILLIS,
             fcmReconnectEnabled = GuardSettingsStore.DEFAULT_FCM_RECONNECT_ENABLED,
             androidUsers = emptyList(),
         )
@@ -227,5 +203,46 @@ class GuardSettingsStoreTest {
             null,
             GuardSettingsStore.decodeLegacyAppPolicy("com.example.push|1|1|1|default|default|1"),
         )
+    }
+
+    @Test
+    fun discoveredFcmAppsAreProtectedWithoutBatteryManagement() {
+        val policy = AppPolicyDefaults.discovered("com.example.push")
+
+        assertTrue(policy.appEnabled)
+        assertTrue(policy.aurogonEnabled)
+        assertTrue(policy.autoUnstopEnabled)
+        assertTrue(policy.autostartManaged)
+        assertTrue(policy.autostartEnabled)
+        assertFalse(policy.dozeManaged)
+    }
+
+    @Test
+    fun telegramHasNoBatteryManagementPresetOnFreshSettings() {
+        val policy = AppPolicyDefaults.forPackage("org.telegram.messenger")
+
+        assertFalse(policy.dozeManaged)
+        assertEquals(AppPolicy("org.telegram.messenger"), policy)
+    }
+
+    @Test
+    fun adoptionSkipsAppsWithASavedChoiceIncludingExplicitDisable() {
+        val saved = mapOf(
+            "com.example.off" to AppPolicy("com.example.off", appEnabled = false, aurogonEnabled = true),
+            "com.example.on" to AppPolicy("com.example.on", appEnabled = true),
+        )
+
+        assertEquals(
+            listOf("com.example.new", "com.example.newer"),
+            GuardSettingsStore.adopt(
+                saved,
+                listOf("com.example.newer", "com.example.off", "com.example.on", "com.example.new", "com.example.new"),
+            ),
+        )
+    }
+
+    @Test
+    fun adoptionIgnoresInvalidPackageNames() {
+        assertEquals(emptyList<String>(), GuardSettingsStore.adopt(emptyMap(), listOf("", "com.bad|name", "a b")))
     }
 }

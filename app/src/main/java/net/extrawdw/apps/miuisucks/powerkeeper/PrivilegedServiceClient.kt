@@ -53,7 +53,6 @@ object PrivilegedServiceClient {
         aurogonPackages: Collection<String>,
         policies: Collection<AppPolicy>,
         targetUserIds: List<Int>,
-        milletPollingIntervalMillis: Long,
         fcmReconnectEnabled: Boolean,
         trigger: String,
         onProgress: (suspend (completedApps: Int, totalApps: Int) -> Unit)? = null,
@@ -73,12 +72,7 @@ object PrivilegedServiceClient {
         }
         try {
             withService("enforce", trigger) { connectedService ->
-                val configurationReport = configureProtection(
-                    connectedService,
-                    milletPollingIntervalMillis,
-                    fcmReconnectEnabled,
-                    trigger,
-                )
+                val configurationReport = configureProtection(connectedService, fcmReconnectEnabled, trigger)
                 // Full passes never apply per-app AppOps or battery state for a disabled app.
                 // Targeted disable cleanup uses applyAppPolicy() and remains intentionally exempt.
                 val orderedPolicies = policies
@@ -105,17 +99,11 @@ object PrivilegedServiceClient {
 
     suspend fun startFcmProtection(
         aurogonPackages: Collection<String>,
-        milletPollingIntervalMillis: Long,
         fcmReconnectEnabled: Boolean,
         trigger: String,
     ): String =
         withService("startFcmProtection", trigger) { connectedService ->
-            val configurationReport = configureProtection(
-                connectedService,
-                milletPollingIntervalMillis,
-                fcmReconnectEnabled,
-                trigger,
-            )
+            val configurationReport = configureProtection(connectedService, fcmReconnectEnabled, trigger)
             val protectionReport = connectedService.startFcmProtection(
                 aurogonPackages.distinct().sorted().toTypedArray(),
                 trigger,
@@ -136,38 +124,30 @@ object PrivilegedServiceClient {
             )
         }
 
-    suspend fun reconcileAurogon(
+    suspend fun reconcileFcmSettings(
         aurogonPackages: Collection<String>,
-        milletPollingIntervalMillis: Long,
         fcmReconnectEnabled: Boolean,
         trigger: String,
     ): String =
-        withService("reconcileAurogon", trigger) { connectedService ->
-            val configurationReport = configureProtection(
-                connectedService,
-                milletPollingIntervalMillis,
-                fcmReconnectEnabled,
-                trigger,
-            )
-            val aurogonReport = connectedService.reconcileAurogon(
+        withService("reconcileFcmSettings", trigger) { connectedService ->
+            val configurationReport = configureProtection(connectedService, fcmReconnectEnabled, trigger)
+            val settingsReport = connectedService.reconcileFcmSettings(
                 aurogonPackages.distinct().sorted().toTypedArray(),
                 trigger,
             )
-            "$configurationReport\n$aurogonReport"
+            "$configurationReport\n$settingsReport"
         }
 
-    suspend fun configureFcmPolling(
-        intervalMillis: Long,
+    suspend fun configureFcmProtection(
         fcmReconnectEnabled: Boolean,
         trigger: String,
     ): String =
-        withService("configureFcmPolling", trigger) { connectedService ->
-            configureProtection(connectedService, intervalMillis, fcmReconnectEnabled, trigger)
+        withService("configureFcmProtection", trigger) { connectedService ->
+            configureProtection(connectedService, fcmReconnectEnabled, trigger)
         }
 
     private fun configureProtection(
         connectedService: IPrivilegedService,
-        intervalMillis: Long,
         fcmReconnectEnabled: Boolean,
         trigger: String,
     ): String {
@@ -182,8 +162,7 @@ object PrivilegedServiceClient {
             }
         }.exceptionOrNull()
         // Preserve ordinary protection when the optional feature's initial read fails.
-        val report = connectedService.configureFcmPolling(
-            intervalMillis,
+        val report = connectedService.configureFcmProtection(
             fcmReconnectEnabled,
             enabled && ownershipError == null,
             preexisting == false,
@@ -197,11 +176,6 @@ object PrivilegedServiceClient {
                 "(${ownershipError.message ?: ownershipError.javaClass.simpleName})"
         }
     }
-
-    suspend fun forceFcmReconnect(trigger: String): String =
-        withService("forceFcmReconnect", trigger) { connectedService ->
-            connectedService.forceFcmReconnect(trigger)
-        }
 
     suspend fun applyAppPolicy(
         policy: AppPolicy,
@@ -318,5 +292,5 @@ object PrivilegedServiceClient {
     private const val CONNECTION_TIMEOUT_MILLIS = 15_000L
     // Increment whenever the UserService implementation or AIDL changes so Shizuku replaces the
     // daemon process instead of retaining code loaded from an older APK.
-    private const val USER_SERVICE_VERSION = 19
+    private const val USER_SERVICE_VERSION = 20
 }

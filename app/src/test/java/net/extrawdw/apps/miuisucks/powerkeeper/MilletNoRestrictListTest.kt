@@ -4,31 +4,38 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MilletNoRestrictListTest {
+    private val required = listOf("com.google.android.gms", "net.extrawdw.apps.miuisucks.powerkeeper")
+
     @Test
-    fun appendsGmsAfterEveryExistingEntry() {
+    fun appendsRequiredPackagesAfterEveryExistingEntry() {
         val existing = "com.android.vending, net.extrawdw.apps.notisync"
 
         assertEquals(
-            listOf("com.android.vending", "net.extrawdw.apps.notisync", "com.google.android.gms"),
-            MilletNoRestrictList.appendGms(existing),
+            listOf(
+                "com.android.vending",
+                "net.extrawdw.apps.notisync",
+                "com.google.android.gms",
+                "net.extrawdw.apps.miuisucks.powerkeeper",
+            ),
+            MilletNoRestrictList.appendMissing(existing, required),
         )
     }
 
     @Test
-    fun leavesExistingGmsEntryInPlace() {
+    fun leavesExistingRequiredEntriesInPlace() {
         val existing = "com.google.android.gms, com.android.vending"
 
         assertEquals(
-            listOf("com.google.android.gms", "com.android.vending"),
-            MilletNoRestrictList.appendGms(existing),
+            listOf("com.google.android.gms", "com.android.vending", "net.extrawdw.apps.miuisucks.powerkeeper"),
+            MilletNoRestrictList.appendMissing(existing, required),
         )
     }
 
     @Test
     fun treatsMissingSettingAsAnEmptyList() {
         assertEquals(
-            listOf("com.google.android.gms"),
-            MilletNoRestrictList.appendGms("null"),
+            required,
+            MilletNoRestrictList.appendMissing("null", required),
         )
     }
 
@@ -37,8 +44,9 @@ class MilletNoRestrictListTest {
         val existing = " com.android.vending,com.android.vending, net.extrawdw.apps.notisync "
 
         assertEquals(
-            "com.android.vending, net.extrawdw.apps.notisync, com.google.android.gms",
-            MilletNoRestrictList.serialize(MilletNoRestrictList.appendGms(existing)),
+            "com.android.vending, net.extrawdw.apps.notisync, com.google.android.gms, " +
+                "net.extrawdw.apps.miuisucks.powerkeeper",
+            MilletNoRestrictList.serialize(MilletNoRestrictList.appendMissing(existing, required)),
         )
     }
 }

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
@@ -19,17 +20,32 @@ data class InstalledFcmApp(
     val installed: Boolean,
 )
 
+/** Finds third-party FCM apps without requesting QUERY_ALL_PACKAGES. */
+object FcmAppDiscovery {
+    /** Non-system packages in this profile that declare an FCM receiver; [packageName] narrows the scan to one app. */
+    @SuppressLint("QueryPermissionsNeeded")
+    @Suppress("DEPRECATION")
+    fun find(context: Context, packageName: String? = null): Set<String> {
+        val pm = context.packageManager
+        return pm.queryBroadcastReceivers(
+            Intent(AurogonConfig.FCM_RECEIVE_ACTION).setPackage(packageName),
+            PackageManager.MATCH_ALL,
+        )
+            .mapNotNull { it.activityInfo?.packageName }
+            .filterTo(linkedSetOf()) { candidate ->
+                candidate != context.packageName &&
+                    candidate != ANDROID_SYSTEM_PACKAGE &&
+                    runCatching { !pm.getApplicationInfo(candidate, 0).isSystemPackage }.getOrDefault(false)
+            }
+    }
+}
+
 object InstalledFcmApps {
     private const val ICON_SIZE_PX = 128
 
-    @SuppressLint("QueryPermissionsNeeded")
-    @Suppress("DEPRECATION")
     fun load(context: Context, savedPackages: Collection<String>): List<InstalledFcmApp> {
         val pm = context.packageManager
-        val discovered = pm.queryBroadcastReceivers(
-            Intent(AurogonConfig.FCM_RECEIVE_ACTION),
-            android.content.pm.PackageManager.MATCH_ALL,
-        ).mapNotNull { it.activityInfo?.packageName }.toMutableSet()
+        val discovered = FcmAppDiscovery.find(context).toMutableSet()
         discovered += savedPackages
         discovered -= context.packageName
         discovered -= ANDROID_SYSTEM_PACKAGE
@@ -50,11 +66,6 @@ object InstalledFcmApps {
         }
     }
 
-    private const val ANDROID_SYSTEM_PACKAGE = "android"
-
-    private val ApplicationInfo.isSystemPackage: Boolean
-        get() = flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-
     private fun Drawable.toImageBitmap(sizePx: Int): ImageBitmap {
         (this as? BitmapDrawable)?.bitmap?.let { return it.scale(sizePx, sizePx).asImageBitmap() }
         val bitmap = createBitmap(sizePx, sizePx)
@@ -63,3 +74,8 @@ object InstalledFcmApps {
         return bitmap.asImageBitmap()
     }
 }
+
+private const val ANDROID_SYSTEM_PACKAGE = "android"
+
+private val ApplicationInfo.isSystemPackage: Boolean
+    get() = flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0

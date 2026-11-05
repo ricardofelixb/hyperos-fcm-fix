@@ -15,8 +15,8 @@ object MilletNoRestrictList {
         return seen.toList()
     }
 
-    fun appendGms(rawValue: String?): List<String> = parse(rawValue).let { existing ->
-        if (GMS_PACKAGE in existing) existing else existing + GMS_PACKAGE
+    fun appendMissing(rawValue: String?, required: List<String>): List<String> = parse(rawValue).let { existing ->
+        existing + required.filterNot(existing::contains)
     }
 
     fun serialize(packages: List<String>): String = packages.joinToString(", ")
