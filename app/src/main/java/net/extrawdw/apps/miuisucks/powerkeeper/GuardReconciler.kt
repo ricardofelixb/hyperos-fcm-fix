@@ -49,7 +49,7 @@ class GuardReconciler(context: Context) {
     }
 
     private suspend fun eventPass(work: GuardWork): String {
-        val adopted = store.adoptFcmApps(work.changedPackages.flatMap { FcmAppDiscovery.find(context, it) })
+        store.adoptFcmApps(work.changedPackages.flatMap { FcmAppDiscovery.find(context, it) })
         val settings = store.loadSettings()
         val users = store.loadEnabledAndroidUserIds()
         val managedChanges = work.changedPackages.filter { settings.policyFor(it).appEnabled }
@@ -57,8 +57,9 @@ class GuardReconciler(context: Context) {
             managedChanges.forEach { packageName ->
                 add(PrivilegedServiceClient.applyAppPolicy(settings.policyFor(packageName), users, work.trigger))
             }
-            // A new rule is only effective once it is in the Aurogon setting.
-            if (work.scope == GuardWork.Scope.SETTINGS || adopted.isNotEmpty()) {
+            // A new rule is only effective once it is in the Aurogon setting. Whoever adopted the app first
+            // (the UI saves defaults when it opens) did not write it, so this cannot depend on who adopted it.
+            if (reconcilesFcmSettings(work.scope, managedChanges)) {
                 add(
                     PrivilegedServiceClient.reconcileFcmSettings(
                         settings.aurogonEnabledPackages,
@@ -84,7 +85,10 @@ class GuardReconciler(context: Context) {
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
 
-    private companion object {
-        const val LOG_TAG = "Guard"
+    companion object {
+        private const val LOG_TAG = "Guard"
+
+        fun reconcilesFcmSettings(scope: GuardWork.Scope, managedChanges: Collection<String>): Boolean =
+            scope == GuardWork.Scope.SETTINGS || managedChanges.isNotEmpty()
     }
 }
