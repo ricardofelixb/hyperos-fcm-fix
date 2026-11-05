@@ -79,6 +79,16 @@ object AppPolicyDefaults {
     fun initialPolicies(): Map<String, AppPolicy> =
         HYPEROS_AUTO_UNRESTRICTED_PACKAGES.associateWith(::forPackage)
 
+    /** An FCM app with no saved choice: protected from the start, with AOSP battery management left alone. */
+    fun discovered(packageName: String): AppPolicy = AppPolicy(
+        packageName = packageName,
+        appEnabled = true,
+        aurogonEnabled = true,
+        autoUnstopEnabled = true,
+        autostartManaged = true,
+        autostartEnabled = true,
+    )
+
     fun forPackage(packageName: String): AppPolicy =
         if (packageName in HYPEROS_AUTO_UNRESTRICTED_PACKAGES) {
             AppPolicy(

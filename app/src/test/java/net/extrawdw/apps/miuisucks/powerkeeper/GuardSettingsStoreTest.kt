@@ -228,4 +228,37 @@ class GuardSettingsStoreTest {
             GuardSettingsStore.decodeLegacyAppPolicy("com.example.push|1|1|1|default|default|1"),
         )
     }
+
+    @Test
+    fun discoveredFcmAppsAreProtectedWithoutBatteryManagement() {
+        val policy = AppPolicyDefaults.discovered("com.example.push")
+
+        assertTrue(policy.appEnabled)
+        assertTrue(policy.aurogonEnabled)
+        assertTrue(policy.autoUnstopEnabled)
+        assertTrue(policy.autostartManaged)
+        assertTrue(policy.autostartEnabled)
+        assertFalse(policy.dozeManaged)
+    }
+
+    @Test
+    fun adoptionSkipsAppsWithASavedChoiceIncludingExplicitDisable() {
+        val saved = mapOf(
+            "com.example.off" to AppPolicy("com.example.off", appEnabled = false, aurogonEnabled = true),
+            "com.example.on" to AppPolicy("com.example.on", appEnabled = true),
+        )
+
+        assertEquals(
+            listOf("com.example.new", "com.example.newer"),
+            GuardSettingsStore.adopt(
+                saved,
+                listOf("com.example.newer", "com.example.off", "com.example.on", "com.example.new", "com.example.new"),
+            ),
+        )
+    }
+
+    @Test
+    fun adoptionIgnoresInvalidPackageNames() {
+        assertEquals(emptyList<String>(), GuardSettingsStore.adopt(emptyMap(), listOf("", "com.bad|name", "a b")))
+    }
 }

@@ -86,6 +86,17 @@ class GuardSettingsStore(context: Context) {
         }
     }
 
+    /**
+     * Saves default protection for FCM apps that have no saved choice and returns the packages it
+     * adopted. An app the user switched off keeps its saved entry, so it is never re-enabled here.
+     */
+    fun adoptFcmApps(packageNames: Collection<String>): List<String> = synchronized(POLICY_LOCK) {
+        val policies = loadAppPolicies()
+        val adopted = adopt(policies, packageNames)
+        if (adopted.isNotEmpty()) saveAppPolicies(policies.values + adopted.map(AppPolicyDefaults::discovered))
+        adopted
+    }
+
     fun setAppEnabled(packageName: String, enabled: Boolean) {
         updateAppPolicy(packageName) { current ->
             val policy = current ?: AppPolicyDefaults.forPackage(packageName)
@@ -207,9 +218,11 @@ class GuardSettingsStore(context: Context) {
 
     private fun updateAppPolicy(packageName: String, transform: (AppPolicy?) -> AppPolicy) {
         require(PACKAGE_NAME.matches(packageName)) { "Invalid package name" }
-        val policies = loadAppPolicies().toMutableMap()
-        policies[packageName] = transform(policies[packageName]).copy(packageName = packageName)
-        saveAppPolicies(policies.values)
+        synchronized(POLICY_LOCK) {
+            val policies = loadAppPolicies().toMutableMap()
+            policies[packageName] = transform(policies[packageName]).copy(packageName = packageName)
+            saveAppPolicies(policies.values)
+        }
     }
 
     private fun saveAppPolicies(policies: Collection<AppPolicy>) {
@@ -274,6 +287,12 @@ class GuardSettingsStore(context: Context) {
         private const val APP_POLICY_SCHEMA_VERSION = 1
 
         private val PACKAGE_NAME = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*")
+
+        // Every store instance shares one preferences file, so read-modify-write cycles share one lock.
+        private val POLICY_LOCK = Any()
+
+        internal fun adopt(saved: Map<String, AppPolicy>, packageNames: Collection<String>): List<String> =
+            packageNames.filter { PACKAGE_NAME.matches(it) && it !in saved }.distinct().sorted()
 
         internal fun encodeAppPolicy(policy: AppPolicy): String = listOf(
             policy.packageName,
