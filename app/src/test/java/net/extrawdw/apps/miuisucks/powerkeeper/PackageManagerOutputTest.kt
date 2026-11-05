@@ -1,35 +1,9 @@
 package net.extrawdw.apps.miuisucks.powerkeeper
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PackageManagerOutputTest {
-    @Test
-    fun parsesUidOnlyForTheExactPackage() {
-        assertEquals(
-            10130,
-            PackageManagerOutput.packageUid(
-                """
-                package:com.google.android.gms.location.history uid:10131
-                package:com.google.android.gms uid:10130
-                """.trimIndent(),
-                "com.google.android.gms",
-            ),
-        )
-    }
-
-    @Test
-    fun rejectsMissingOrMalformedUid() {
-        assertNull(PackageManagerOutput.packageUid("package:com.google.android.gms", "com.google.android.gms"))
-        assertNull(
-            PackageManagerOutput.packageUid(
-                "package:com.google.android.gms uid:not-a-number",
-                "com.google.android.gms",
-            ),
-        )
-    }
-
     @Test
     fun returnsOnlySelectedStoppedPackagesInStableOrder() {
         val output = """

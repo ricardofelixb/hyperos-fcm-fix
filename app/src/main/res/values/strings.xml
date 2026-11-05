@@ -44,7 +44,7 @@
     <string name="aurogon_protection">Aurogon FCM protection</string>
     <string name="aurogon_protection_description">Wake this app when HyperOS would cache its frozen FCM broadcast.</string>
     <string name="auto_unstop">Auto unstop</string>
-    <string name="auto_unstop_description">Clear FLAG_STOPPED for this FCM app without launching it. The independent FCM recovery job runs every 15 minutes.</string>
+    <string name="auto_unstop_description">Clear FLAG_STOPPED for this FCM app without launching it. This runs when the app is installed, updated or force-stopped.</string>
     <string name="miui_autostart">HyperOS Autostart</string>
     <string name="miui_autostart_description">Manage both Xiaomi Autostart AppOps. When off, leave Autostart unchanged.</string>
     <string name="policy_enabled">Enabled</string>
@@ -64,13 +64,10 @@
     <string name="gms_status_unavailable">Status unavailable</string>
     <string name="gms_status_protected">Protection active</string>
     <string name="gms_status_needs_attention">Needs attention</string>
-    <string name="millet_polling_frequency">Polling frequency</string>
-    <string name="millet_polling_frequency_description">How often the Shizuku User Service repairs protection settings and checks enabled FCM protections. The polling loop stays inside the service and does not create or hold a Wake Lock.</string>
     <string name="fcm_reconnect_protection">FCM Connection Protection</string>
-    <string name="fcm_reconnect_protection_description">Checks the FCM connection while monitoring is active and asks Google Play services to reconnect during periodic recovery.</string>
+    <string name="fcm_reconnect_protection_description">Asks Google Play services to reconnect after its no-restrict entry had to be restored.</string>
     <string name="nighttime_fcm_protection">Nighttime FCM protection (HyperOS 4)</string>
     <string name="nighttime_fcm_protection_description">Experimental workaround for extra freezing of Google Play services on HyperOS 4 at night (23:00–07:59). Enable it if you need to receive FCM messages during these hours. May increase battery use.</string>
-    <string name="polling_interval_seconds">%1$ss</string>
     <string name="millet_no_restrict_description">Apps currently exempt from HyperOS background restrictions.</string>
     <string name="millet_no_restrict_empty">No packages in the list.</string>
     <string name="checking">Checking…</string>
@@ -78,14 +75,6 @@
     <string name="fcm_diagnostics" translatable="false">FCM Diagnostics</string>
     <string name="fcm_diagnostics_unavailable_message">FCM Diagnostics is not available in this version of Google Play services.</string>
 
-    <string name="check_frequency">Periodical enforcement frequency</string>
-    <string name="off">Off</string>
-    <string name="interval_minutes">%1$d min</string>
-    <string name="interval_one_hour">1 hour</string>
-    <plurals name="interval_hours">
-        <item quantity="one">%1$d hour</item>
-        <item quantity="other">%1$d hours</item>
-    </plurals>
 
     <string name="last_check">Last check</string>
     <string name="last_check_successful">Successful · %1$s</string>
@@ -120,9 +109,6 @@
     <string name="app_setting_saved_message">%1$s settings saved.</string>
     <string name="app_setting_applied_message">%1$s setting applied.</string>
     <string name="app_setting_failed_message">Could not apply %1$s setting: %2$s</string>
-    <string name="frequency_changed_message">Check frequency changed to %1$s.</string>
-    <string name="millet_polling_frequency_changed_message">Protection polling frequency changed to %1$s.</string>
-    <string name="millet_polling_frequency_apply_failed_message">Saved the %1$s protection polling frequency, but could not update the running Shizuku service: %2$s</string>
     <string name="fcm_reconnect_enabled_message">FCM Connection Protection enabled.</string>
     <string name="fcm_reconnect_disabled_message">FCM Connection Protection disabled.</string>
     <string name="fcm_reconnect_apply_failed_message">Saved FCM Connection Protection, but could not update the running Shizuku service: %1$s</string>
@@ -145,4 +131,7 @@
     <string name="android_user_fallback">User %1$d</string>
     <string name="protection_status_failed_message">Could not check protection status: %1$s</string>
     <string name="unknown_error">Unknown error</string>
+    <string name="guard_notification_channel">Background protection</string>
+    <string name="guard_notification_title">Keeping push notifications working</string>
+    <string name="guard_notification_text">Watching for settings and app changes</string>
 </resources>

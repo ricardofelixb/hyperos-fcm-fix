@@ -7,28 +7,6 @@ import org.junit.Test
 
 class GuardSettingsStoreTest {
     @Test
-    fun offIntervalRemainsDisabled() {
-        assertEquals(
-            GuardSettingsStore.DISABLED_INTERVAL_MINUTES,
-            GuardSettingsStore.normalizeIntervalMinutes(GuardSettingsStore.DISABLED_INTERVAL_MINUTES),
-        )
-        assertFalse(
-            GuardSettingsStore.isPeriodicEnforcementEnabled(GuardSettingsStore.DISABLED_INTERVAL_MINUTES),
-        )
-    }
-
-    @Test
-    fun enabledIntervalHonorsWorkManagerMinimum() {
-        assertEquals(
-            GuardSettingsStore.MINIMUM_INTERVAL_MINUTES,
-            GuardSettingsStore.normalizeIntervalMinutes(1L),
-        )
-        assertTrue(
-            GuardSettingsStore.isPeriodicEnforcementEnabled(GuardSettingsStore.MINIMUM_INTERVAL_MINUTES),
-        )
-    }
-
-    @Test
     fun fcmReconnectDefaultsEnabled() {
         assertTrue(GuardSettingsStore.DEFAULT_FCM_RECONNECT_ENABLED)
     }
@@ -170,8 +148,6 @@ class GuardSettingsStoreTest {
         val settings = GuardSettings(
             appPolicies = listOf(enabledAurogon, enabledUnstop, disabled)
                 .associateBy(AppPolicy::packageName),
-            intervalMinutes = GuardSettingsStore.MINIMUM_INTERVAL_MINUTES,
-            milletPollingIntervalMillis = MilletPollingInterval.DEFAULT_MILLIS,
             fcmReconnectEnabled = GuardSettingsStore.DEFAULT_FCM_RECONNECT_ENABLED,
             androidUsers = emptyList(),
         )

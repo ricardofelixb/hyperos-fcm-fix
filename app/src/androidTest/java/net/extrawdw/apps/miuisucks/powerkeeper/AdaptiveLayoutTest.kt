@@ -86,13 +86,13 @@ class AdaptiveLayoutTest {
                 state = GuardUiState(installedApps = apps, settings = GuardUiState().settings.copy(appPolicies = policies)),
                 onRequestShizuku = {}, onOpenShizuku = {}, onApplyNow = {},
                 onRefreshAndroidUsers = {}, onAndroidUserEnabledChanged = { _, _ -> },
-                onRefreshProtectionStatus = {}, onMilletPollingIntervalSelected = {},
+                onRefreshProtectionStatus = {},
                 onFcmReconnectEnabledChanged = {}, onNighttimeFcmProtectionEnabledChanged = {},
                 onOpenFcmDiagnostics = {}, onAppEnabledChanged = { _, _ -> },
                 onAurogonChanged = { _, _ -> }, onAutoUnstopChanged = { _, _ -> },
                 onAutostartManagedChanged = { _, _ -> }, onAutostartChanged = { _, _ -> },
                 onDozeManagedChanged = { _, _ -> }, onDozeChanged = { _, _ -> },
-                onIntervalSelected = {}, onLogsCleared = {},
+                onLogsCleared = {},
             )
         }
     }

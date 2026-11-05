@@ -44,7 +44,7 @@
     <string name="aurogon_protection">Aurogon FCM 保護</string>
     <string name="aurogon_protection_description">當 HyperOS 準備快取此應用程式已凍結的 FCM 廣播時，喚醒此應用程式。</string>
     <string name="auto_unstop">自動解除停止</string>
-    <string name="auto_unstop_description">清除這個 FCM 應用程式的 FLAG_STOPPED，但不會啟動應用程式。獨立的 FCM 復原工作每 15 分鐘執行一次。</string>
+    <string name="auto_unstop_description">清除這個 FCM 應用程式的 FLAG_STOPPED，但不會啟動應用程式。應用程式被安裝、更新或強制停止時自動執行。</string>
     <string name="miui_autostart">HyperOS 自動啟動</string>
     <string name="miui_autostart_description">管理 Xiaomi 的兩個自動啟動 AppOps。關閉時不變更自動啟動設定。</string>
     <string name="policy_enabled">啟用</string>
@@ -64,13 +64,10 @@
     <string name="gms_status_unavailable">無法取得狀態</string>
     <string name="gms_status_protected">保護作用中</string>
     <string name="gms_status_needs_attention">需要注意</string>
-    <string name="millet_polling_frequency">輪詢頻率</string>
-    <string name="millet_polling_frequency_description">Shizuku 使用者服務會依此頻率修復保護設定，並檢查已啟用的 FCM 保護功能。輪詢迴圈始終在該服務內執行，且不會建立及保留喚醒鎖定。</string>
     <string name="fcm_reconnect_protection">FCM 連線保護</string>
-    <string name="fcm_reconnect_protection_description">監控執行時檢查 FCM 連線，並在定期復原工作中要求 Google Play 服務重新連線。</string>
+    <string name="fcm_reconnect_protection_description">Google Play 服務的免限制項目被還原後，要求其重新連線。</string>
     <string name="nighttime_fcm_protection">夜間 FCM 保護（HyperOS 4）</string>
     <string name="nighttime_fcm_protection_description">實驗性功能，用於避開 HyperOS 4 在夜間（23:00–07:59）對 Google Play 服務的額外凍結。如需在此時段接收 FCM 訊息，可啟用此功能，可能會增加耗電量。</string>
-    <string name="polling_interval_seconds">%1$s 秒</string>
     <string name="millet_no_restrict_description">目前不受 HyperOS 背景限制的應用程式清單。</string>
     <string name="millet_no_restrict_empty">清單中沒有套件。</string>
     <string name="checking">檢查中…</string>
@@ -78,14 +75,6 @@
     <string name="fcm_diagnostics" translatable="false">FCM Diagnostics</string>
     <string name="fcm_diagnostics_unavailable_message">此版本的 Google Play 服務不提供 FCM Diagnostics 頁面。</string>
 
-    <string name="check_frequency">週期性套用頻率</string>
-    <string name="off">關閉</string>
-    <string name="interval_minutes">%1$d 分鐘</string>
-    <string name="interval_one_hour">1 小時</string>
-    <plurals name="interval_hours">
-        <item quantity="one">%1$d 小時</item>
-        <item quantity="other">%1$d 小時</item>
-    </plurals>
 
     <string name="last_check">上次檢查</string>
     <string name="last_check_successful">成功 · %1$s</string>
@@ -120,9 +109,6 @@
     <string name="app_setting_saved_message">%1$s 設定已儲存。</string>
     <string name="app_setting_applied_message">%1$s 設定已套用。</string>
     <string name="app_setting_failed_message">無法套用 %1$s 設定：%2$s</string>
-    <string name="frequency_changed_message">檢查頻率已變更為 %1$s。</string>
-    <string name="millet_polling_frequency_changed_message">保護輪詢頻率已變更為 %1$s。</string>
-    <string name="millet_polling_frequency_apply_failed_message">已儲存 %1$s 的保護輪詢頻率，但無法更新執行中的 Shizuku 使用者服務：%2$s</string>
     <string name="fcm_reconnect_enabled_message">已啟用 FCM 連線保護。</string>
     <string name="fcm_reconnect_disabled_message">已停用 FCM 連線保護。</string>
     <string name="fcm_reconnect_apply_failed_message">已儲存 FCM 連線保護設定，但無法更新執行中的 Shizuku 使用者服務：%1$s</string>
@@ -145,4 +131,7 @@
     <string name="android_user_fallback">使用者 %1$d</string>
     <string name="protection_status_failed_message">無法檢查保護狀態：%1$s</string>
     <string name="unknown_error">未知錯誤</string>
+    <string name="guard_notification_channel">背景保護</string>
+    <string name="guard_notification_title">正在確保推播通知正常</string>
+    <string name="guard_notification_text">監聽設定與應用程式變更</string>
 </resources>

@@ -5,8 +5,6 @@ import androidx.core.content.edit
 
 data class GuardSettings(
     val appPolicies: Map<String, AppPolicy>,
-    val intervalMinutes: Long,
-    val milletPollingIntervalMillis: Long,
     val fcmReconnectEnabled: Boolean,
     val androidUsers: List<AndroidUserSelection>,
     val nighttimeFcmProtectionEnabled: Boolean = false,
@@ -43,15 +41,6 @@ class GuardSettingsStore(context: Context) {
 
     fun loadSettings(): GuardSettings = GuardSettings(
         appPolicies = loadAppPolicies(),
-        intervalMinutes = normalizeIntervalMinutes(
-            preferences.getLong(KEY_INTERVAL_MINUTES, DEFAULT_INTERVAL_MINUTES),
-        ),
-        milletPollingIntervalMillis = MilletPollingInterval.normalize(
-            preferences.getLong(
-                KEY_MILLET_POLLING_INTERVAL_MILLIS,
-                MilletPollingInterval.DEFAULT_MILLIS,
-            ),
-        ),
         fcmReconnectEnabled = preferences.getBoolean(
             KEY_FCM_RECONNECT_ENABLED,
             DEFAULT_FCM_RECONNECT_ENABLED,
@@ -137,21 +126,6 @@ class GuardSettingsStore(context: Context) {
     fun setDozeManaged(packageName: String, managed: Boolean) {
         updateAppPolicy(packageName) { current ->
             (current ?: AppPolicyDefaults.forPackage(packageName)).copy(dozeManaged = managed)
-        }
-    }
-
-    fun setIntervalMinutes(minutes: Long) {
-        preferences.edit {
-            putLong(KEY_INTERVAL_MINUTES, normalizeIntervalMinutes(minutes))
-        }
-    }
-
-    fun setMilletPollingIntervalMillis(intervalMillis: Long) {
-        preferences.edit {
-            putLong(
-                KEY_MILLET_POLLING_INTERVAL_MILLIS,
-                MilletPollingInterval.normalize(intervalMillis),
-            )
         }
     }
 
@@ -255,27 +229,12 @@ class GuardSettingsStore(context: Context) {
     }
 
     companion object {
-        const val DISABLED_INTERVAL_MINUTES = 0L
-        const val MINIMUM_INTERVAL_MINUTES = 15L
-        const val DEFAULT_INTERVAL_MINUTES = 60L
         const val DEFAULT_FCM_RECONNECT_ENABLED = true
         const val DEFAULT_NIGHTTIME_FCM_PROTECTION_ENABLED = false
-
-        fun isPeriodicEnforcementEnabled(intervalMinutes: Long): Boolean =
-            intervalMinutes > DISABLED_INTERVAL_MINUTES
-
-        internal fun normalizeIntervalMinutes(minutes: Long): Long =
-            if (minutes == DISABLED_INTERVAL_MINUTES) {
-                DISABLED_INTERVAL_MINUTES
-            } else {
-                minutes.coerceAtLeast(MINIMUM_INTERVAL_MINUTES)
-            }
 
         private const val PREFERENCES_NAME = "guard_settings"
         private const val KEY_APP_POLICIES = "app_policies"
         private const val KEY_APP_POLICY_SCHEMA_VERSION = "app_policy_schema_version"
-        private const val KEY_INTERVAL_MINUTES = "interval_minutes"
-        private const val KEY_MILLET_POLLING_INTERVAL_MILLIS = "millet_polling_interval_millis"
         private const val KEY_FCM_RECONNECT_ENABLED = "fcm_reconnect_enabled"
         private const val KEY_NIGHTTIME_FCM_PROTECTION_ENABLED = "nighttime_fcm_protection_enabled"
         private const val KEY_NIGHTTIME_GMS_PREEXISTING = "nighttime_gms_preexisting"
